@@ -14,6 +14,8 @@ import (
 	"github.com/mackerelio/mackerel-agent/command"
 	"github.com/mackerelio/mackerel-agent/config"
 	"github.com/mackerelio/mackerel-agent/mackerel"
+	"github.com/mackerelio/mackerel-agent/pidfile"
+	"github.com/mackerelio/mackerel-agent/supervisor"
 	"github.com/mackerelio/mackerel-agent/version"
 )
 
@@ -53,6 +55,32 @@ func doInit(fs *flag.FlagSet, argv []string) error {
 		return nil
 	}
 	return err
+}
+
+/* +command supervise - supervisor mode
+
+	supervise -conf mackerel-agent.conf ...
+
+run as supervisor mode enabling configuration reloading and crash recovery
+*/
+func doSupervise(fs *flag.FlagSet, argv []string) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("supervise mode is not supported on windows")
+	}
+	copiedArgv := make([]string, len(argv))
+	copy(copiedArgv, argv)
+	conf, err := resolveConfig(fs, argv)
+	if err != nil {
+		return err
+	}
+	setLogLevel(conf.Silent, conf.Verbose)
+	err = pidfile.Create(conf.Pidfile)
+	if err != nil {
+		return err
+	}
+	defer pidfile.Remove(conf.Pidfile)
+
+	return supervisor.Supervise(os.Args[0], copiedArgv, nil)
 }
 
 /* +command version - display version of mackerel-agent
@@ -96,7 +124,7 @@ func doRetire(fs *flag.FlagSet, argv []string) error {
 
 	hostID, err := conf.LoadHostID()
 	if err != nil {
-		return fmt.Errorf("HostID file is not found")
+		return fmt.Errorf("hostID file is not found")
 	}
 
 	api, err := mackerel.NewAPI(conf.Apibase, conf.Apikey, conf.Verbose)
@@ -105,7 +133,7 @@ func doRetire(fs *flag.FlagSet, argv []string) error {
 	}
 
 	if !force && !prompter.YN(fmt.Sprintf("retire this host? (hostID: %s)", hostID), false) {
-		return fmt.Errorf("Retirement is canceled.")
+		return fmt.Errorf("retirement is canceled")
 	}
 
 	err = retry.Retry(10, 3*time.Second, func() error {

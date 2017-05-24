@@ -28,18 +28,8 @@ func metricsGenerators(conf *config.Config) []metrics.Generator {
 		&metricsLinux.CPUUsageGenerator{Interval: metricsInterval},
 		&metricsLinux.MemoryGenerator{},
 		&metricsLinux.InterfaceGenerator{Interval: metricsInterval},
-		&metricsLinux.DiskGenerator{Interval: metricsInterval},
-		&metrics.FilesystemGenerator{IgnoreRegexp: conf.Filesystems.Ignore.Regexp},
-	}
-
-	return generators
-}
-
-func pluginGenerators(conf *config.Config) []metrics.PluginGenerator {
-	generators := []metrics.PluginGenerator{}
-
-	for _, pluginConfig := range conf.Plugin["metrics"] {
-		generators = append(generators, metrics.NewPluginGenerator(pluginConfig))
+		&metricsLinux.DiskGenerator{Interval: metricsInterval, UseMountpoint: conf.Filesystems.UseMountpoint},
+		&metrics.FilesystemGenerator{IgnoreRegexp: conf.Filesystems.Ignore.Regexp, UseMountpoint: conf.Filesystems.UseMountpoint},
 	}
 
 	return generators

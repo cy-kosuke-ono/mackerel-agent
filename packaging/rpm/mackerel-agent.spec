@@ -6,15 +6,15 @@
 Name:      mackerel-agent
 Version:   %{_version}
 Release:   1
-License:   Commercial
+License:   ASL 2.0
 Summary:   mackerel.io agent
 URL:       https://mackerel.io
-Group:     Hatena
+Group:     Hatena Co., Ltd.
 Source0:   %{name}.initd
 Source1:   %{name}.sysconfig
 Source2:   %{name}.logrotate
 Source3:   %{name}.conf
-Packager:  Hatena
+Packager:  Hatena Co., Ltd.
 BuildArch: %{buildarch}
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 Requires(post): /sbin/chkconfig
@@ -62,6 +62,116 @@ fi
 /usr/local/bin/%{name}
 
 %changelog
+* Wed May 17 2017 <mackerel-developers@hatena.ne.jp> - 0.43.1-1
+- rename command.Context to command.App (by Songmu)
+- Add `prevent_alert_auto_close` option for check plugins (by mechairoi)
+- Remove supported OS section from README. (by astj)
+
+* Tue May 09 2017 <mackerel-developers@hatena.ne.jp> - 0.43.0-1
+- Use DiskReadsPerSec/DiskWritesPerSec instead of DiskReadBytesPersec/DiskWriteBytesPersec (on Windows) (by mattn)
+- Enable HTTP/2 (by astj)
+
+* Thu Apr 27 2017 <mackerel-developers@hatena.ne.jp> - 0.42.3-1
+- Output error logs of mackerel-agent as warning log of windows event log (by Songmu)
+
+* Wed Apr 19 2017 <mackerel-developers@hatena.ne.jp> - 0.42.2-1
+- Adjust config package (by Songmu)
+- use CRLF in mackerel-agent.conf on windows (by Songmu)
+
+* Tue Apr 11 2017 <mackerel-developers@hatena.ne.jp> - 0.42.1-1
+- LC_ALL=C on initialization (by Songmu)
+
+* Thu Apr 06 2017 <mackerel-developers@hatena.ne.jp> - 0.42.0-1
+- Logs that are not via the mackerel-agent's logger are also output to the eventlog (by Songmu)
+- Change package License to Apache 2.0 (by astj)
+- Release systemd deb packages to github releases (by astj)
+- Change systemd deb package architecture to amd64 (by astj)
+
+* Mon Mar 27 2017 <mackerel-developers@hatena.ne.jp> - 0.41.3-1
+- build with Go 1.8 (by astj)
+- [EXPERIMENTAL] Add systemd support for deb packages (by astj)
+- Timeout for command execution on Windows (by mattn)
+- It need to read output from command continuously. (by mattn)
+- remove util/util_windows.go and commonalize util.RunCommand (by Songmu)
+
+* Wed Mar 22 2017 <mackerel-developers@hatena.ne.jp> - 0.41.2-1
+- Don't raise error when creating pidfile if the contents of pidfile is same as own pid (by Songmu)
+- Exclude _tools from package (by itchyny)
+- Add workaround for docker0 interface in docker-enabled Travis (by astj)
+
+* Thu Mar 09 2017 <mackerel-developers@hatena.ne.jp> - 0.41.1-1
+- add check-tcp on pluginlist.txt (by daiksy)
+
+* Tue Mar 07 2017 <mackerel-developers@hatena.ne.jp> - 0.41.0-1
+- [EXPERIMENTAL] systemd support for CentOS 7 (by astj)
+- add `supervise` subcommand (supervisor mode) (by Songmu)
+- Build RPM packages with Docker (by astj)
+- run test with -race in CI (by haya14busa)
+- Use hw.physmem64 instead of hw.physmem in NetBSD (by miwarin, astj)
+- Build RPM files on CentOS5 on Docker (by astj)
+- Keep environment variables when Agent runs commands with sudo (by astj)
+- Release systemd RPMs to github releases (by astj)
+- Fix disk metrics on Windows (by mattn)
+
+* Wed Feb 22 2017 <mackerel-developers@hatena.ne.jp> - 0.40.0-1
+- support metadata plugins in configuration (by itchyny)
+- Add metadata plugin feature (by itchyny)
+- Use Named Result Parameters as document (by haya14busa)
+- Set large number of file descriptors for the safety sake in init scripts (by Songmu)
+- Improve darwin cpu spec (by astj)
+- Fix format verb: use '%v' (by haya14busa)
+
+* Wed Feb 08 2017 <mackerel-developers@hatena.ne.jp> - 0.39.4-1
+- prepare windows eventlog (by daiksy)
+- Refactor plugin configurations (by itchyny)
+- Execute less `go build`s on deploy (by astj)
+- treat xmlns (by mattn)
+- Fix xmlns (by mattn)
+
+* Wed Jan 25 2017 <mackerel-developers@hatena.ne.jp> - 0.39.3-1
+- Fix segfault when loading a bad config file (by hanazuki)
+- fix windows eventlog level when "verbose=true" (by daiksy)
+
+* Mon Jan 16 2017 <mackerel-developers@hatena.ne.jp> - 0.39.2-1
+- Test wix/pluginlist.txt on AppVeyor ci (by astj)
+- Revert "remove windows plugins on pluginslist" (by daiksy)
+
+* Thu Jan 12 2017 <mackerel-developers@hatena.ne.jp> - 0.39.1-1
+- support filesystems.Ignore on windows (by Songmu)
+- remove windows plugins on pluginslist (by daiksy)
+
+* Wed Jan 11 2017 <mackerel-developers@hatena.ne.jp> - 0.39.0-1
+- implement `pluginGenerators` for windows (by daiksy)
+- add check-windows-eventlog on pluginlist (by daiksy)
+- Remove duplicated generator in Windows (by astj)
+- add mackerel-plugin-windows-server-sessions on pluginlist (by daiksy)
+
+* Wed Dec 21 2016 <mackerel-developers@hatena.ne.jp> - 0.38.0-1
+- fix typo (by ts-3156)
+- Add Copyright (by yuuki)
+- Separate interfaceGenerator from specGenerators (by motemen)
+- Timout http reuquest in 30 sec (requries go 1.3) (by hakobe)
+- specify command arguments in mackerel-agent.conf (by Songmu)
+- several improvements for Windows (by daiksy)
+- Avoid time.Tick and use time.NewTicker instead (by haya14busa)
+
+* Tue Nov 29 2016 <mackerel-developers@hatena.ne.jp> - 0.37.1-1
+- fix pluginlist (by daiksy)
+- Suppress ec2 metadata warnings (by itchyny)
+- Uncapitalize error messages (by itchyny)
+
+* Thu Oct 27 2016 <mackerel-developers@hatena.ne.jp> - 0.37.0-1
+- improve Windows support (by daiksy)
+
+* Tue Oct 18 2016 <mackerel-developers@hatena.ne.jp> - 0.36.0-1
+- don't use HTTP_PROXY when requesting cloud instance metadata APIs (by Songmu)
+- Add an option to output filesystem-related metrics with key by mountpoint (by astj)
+
+* Thu Sep 29 2016 <mackerel-developers@hatena.ne.jp> - 0.35.1-1
+- support MACKEREL_PLUGIN_WORKDIR in init scripts (by Songmu)
+- Add platform metadata for Darwin (by astj)
+- Disable http2 for now (by Songmu)
+
 * Wed Sep 07 2016 <mackerel-developers@hatena.ne.jp> - 0.35.0-1
 - built with Go 1.7 (by Songmu)
 - remove `func (vs *Values) Merge(other Values)` (by Songmu)

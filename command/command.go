@@ -76,7 +76,7 @@ func prepareHost(conf *config.Config, api *mackerel.API) (*mackerel.Host, error)
 			})
 
 			if lastErr != nil {
-				return nil, fmt.Errorf("Failed to register this host: %s", lastErr.Error())
+				return nil, fmt.Errorf("failed to register this host: %s", lastErr.Error())
 			}
 
 			doRetry(func() error {
@@ -84,7 +84,7 @@ func prepareHost(conf *config.Config, api *mackerel.API) (*mackerel.Host, error)
 				return filterErrorForRetry(lastErr)
 			})
 			if lastErr != nil {
-				return nil, fmt.Errorf("Failed to find this host on mackerel: %s", lastErr.Error())
+				return nil, fmt.Errorf("failed to find this host on mackerel: %s", lastErr.Error())
 			}
 		}
 	} else { // check the hostID is valid or not
@@ -94,9 +94,9 @@ func prepareHost(conf *config.Config, api *mackerel.API) (*mackerel.Host, error)
 		})
 		if lastErr != nil {
 			if fsStorage, ok := conf.HostIDStorage.(*config.FileSystemHostIDStorage); ok {
-				return nil, fmt.Errorf("Failed to find this host on mackerel (You may want to delete file \"%s\" to register this host to an another organization): %s", fsStorage.HostIDFile(), lastErr.Error())
+				return nil, fmt.Errorf("failed to find this host on mackerel (You may want to delete file \"%s\" to register this host to an another organization): %s", fsStorage.HostIDFile(), lastErr.Error())
 			}
-			return nil, fmt.Errorf("Failed to find this host on mackerel: %s", lastErr.Error())
+			return nil, fmt.Errorf("failed to find this host on mackerel: %s", lastErr.Error())
 		}
 	}
 
@@ -107,13 +107,13 @@ func prepareHost(conf *config.Config, api *mackerel.API) (*mackerel.Host, error)
 			return filterErrorForRetry(lastErr)
 		})
 		if lastErr != nil {
-			return nil, fmt.Errorf("Failed to set default host status: %s, %s", hostSt, lastErr.Error())
+			return nil, fmt.Errorf("failed to set default host status: %s, %s", hostSt, lastErr.Error())
 		}
 	}
 
 	lastErr = conf.SaveHostID(result.ID)
 	if lastErr != nil {
-		return nil, fmt.Errorf("Failed to save host ID: %s", lastErr.Error())
+		return nil, fmt.Errorf("failed to save host ID: %s", lastErr.Error())
 	}
 
 	return result, nil
@@ -123,15 +123,7 @@ func prepareHost(conf *config.Config, api *mackerel.API) (*mackerel.Host, error)
 // configuration of the custom_identifier fields.
 func prepareCustomIdentiferHosts(conf *config.Config, api *mackerel.API) map[string]*mackerel.Host {
 	customIdentifierHosts := make(map[string]*mackerel.Host)
-	customIdentifiers := make(map[string]bool) // use a map to make them unique
-	for _, pluginConfigs := range conf.Plugin {
-		for _, pluginConfig := range pluginConfigs {
-			if pluginConfig.CustomIdentifier != nil {
-				customIdentifiers[*pluginConfig.CustomIdentifier] = true
-			}
-		}
-	}
-	for customIdentifier := range customIdentifiers {
+	for _, customIdentifier := range conf.ListCustomIdentifiers() {
 		host, err := api.FindHostByCustomIdentifier(customIdentifier)
 		if err != nil {
 			logger.Warningf("Failed to retrieve the host of custom_identifier: %s, %s", customIdentifier, err)
@@ -150,8 +142,8 @@ func delayByHost(host *mackerel.Host) int {
 	return int(s[len(s)-1]) % int(config.PostMetricsInterval.Seconds())
 }
 
-// Context context object
-type Context struct {
+// App contains objects for running main loop of mackerel-agent
+type App struct {
 	Agent                 *agent.Agent
 	Config                *config.Config
 	Host                  *mackerel.Host
@@ -178,33 +170,40 @@ const (
 	loopStateTerminating
 )
 
-func loop(c *Context, termCh chan struct{}) error {
+func loop(app *App, termCh chan struct{}) error {
 	quit := make(chan struct{})
 	defer close(quit) // broadcast terminating
 
 	// Periodically update host specs.
-	go updateHostSpecsLoop(c, quit)
+	go updateHostSpecsLoop(app, quit)
 
-	postQueue := make(chan *postValue, c.Config.Connection.PostMetricsBufferSize)
-	go enqueueLoop(c, postQueue, quit)
+	postQueue := make(chan *postValue, app.Config.Connection.PostMetricsBufferSize)
+	go enqueueLoop(app, postQueue, quit)
 
-	postDelaySeconds := delayByHost(c.Host)
+	postDelaySeconds := delayByHost(app.Host)
 	initialDelay := postDelaySeconds / 2
 	logger.Debugf("wait %d seconds before initial posting.", initialDelay)
 	select {
 	case <-termCh:
 		return nil
 	case <-time.After(time.Duration(initialDelay) * time.Second):
-		c.Agent.InitPluginGenerators(c.API)
+		app.Agent.InitPluginGenerators(app.API)
 	}
 
 	termMetricsCh := make(chan struct{})
 	var termCheckerCh chan struct{}
+	var termMetadataCh chan struct{}
 
-	hasChecks := len(c.Agent.Checkers) > 0
+	hasChecks := len(app.Agent.Checkers) > 0
 	if hasChecks {
 		termCheckerCh = make(chan struct{})
 	}
+
+	hasMetadataPlugins := len(app.Agent.MetadataGenerators) > 0
+	if hasMetadataPlugins {
+		termMetadataCh = make(chan struct{})
+	}
+
 	// fan-out termCh
 	go func() {
 		for range termCh {
@@ -212,10 +211,18 @@ func loop(c *Context, termCh chan struct{}) error {
 			if termCheckerCh != nil {
 				termCheckerCh <- struct{}{}
 			}
+			if termMetadataCh != nil {
+				termMetadataCh <- struct{}{}
+			}
 		}
 	}()
+
 	if hasChecks {
-		go runCheckersLoop(c, termCheckerCh, quit)
+		go runCheckersLoop(app, termCheckerCh, quit)
+	}
+
+	if hasMetadataPlugins {
+		go runMetadataLoop(app, termMetadataCh, quit)
 	}
 
 	lState := loopStateFirst
@@ -243,10 +250,10 @@ func loop(c *Context, termCh chan struct{}) error {
 			case loopStateFirst: // request immediately to create graph defs of host
 				// nop
 			case loopStateQueued:
-				delaySeconds = c.Config.Connection.PostMetricsDequeueDelaySeconds
+				delaySeconds = app.Config.Connection.PostMetricsDequeueDelaySeconds
 			case loopStateHadError:
 				// TODO: better interval calculation. exponential backoff or so.
-				delaySeconds = c.Config.Connection.PostMetricsRetryDelaySeconds
+				delaySeconds = app.Config.Connection.PostMetricsRetryDelaySeconds
 			case loopStateTerminating:
 				// dequeue and post every one second when terminating.
 				delaySeconds = 1
@@ -285,7 +292,7 @@ func loop(c *Context, termCh chan struct{}) error {
 			for _, v := range origPostValues {
 				postValues = append(postValues, v.values...)
 			}
-			err := c.API.PostMetricsValues(postValues)
+			err := app.API.PostMetricsValues(postValues)
 			if err != nil {
 				logger.Errorf("Failed to post metrics value (will retry): %s", err.Error())
 				if lState != loopStateTerminating {
@@ -296,7 +303,7 @@ func loop(c *Context, termCh chan struct{}) error {
 						v.retryCnt++
 						// It is difficult to distinguish the error is server error or data error.
 						// So, if retryCnt exceeded the configured limit, postValue is considered invalid and abandoned.
-						if v.retryCnt > c.Config.Connection.PostMetricsRetryMax {
+						if v.retryCnt > app.Config.Connection.PostMetricsRetryMax {
 							json, err := json.Marshal(v.values)
 							if err != nil {
 								logger.Errorf("Something wrong with post values. marshaling failed.")
@@ -319,9 +326,9 @@ func loop(c *Context, termCh chan struct{}) error {
 	}
 }
 
-func updateHostSpecsLoop(c *Context, quit chan struct{}) {
+func updateHostSpecsLoop(app *App, quit chan struct{}) {
 	for {
-		c.UpdateHostSpecs()
+		app.UpdateHostSpecs()
 		select {
 		case <-quit:
 			return
@@ -331,8 +338,8 @@ func updateHostSpecsLoop(c *Context, quit chan struct{}) {
 	}
 }
 
-func enqueueLoop(c *Context, postQueue chan *postValue, quit chan struct{}) {
-	metricsResult := c.Agent.Watch()
+func enqueueLoop(app *App, postQueue chan *postValue, quit chan struct{}) {
+	metricsResult := app.Agent.Watch(quit)
 	for {
 		select {
 		case <-quit:
@@ -341,9 +348,9 @@ func enqueueLoop(c *Context, postQueue chan *postValue, quit chan struct{}) {
 			created := float64(result.Created.Unix())
 			creatingValues := [](*mackerel.CreatingMetricsValue){}
 			for _, values := range result.Values {
-				hostID := c.Host.ID
+				hostID := app.Host.ID
 				if values.CustomIdentifier != nil {
-					if host, ok := c.CustomIdentifierHosts[*values.CustomIdentifier]; ok {
+					if host, ok := app.CustomIdentifierHosts[*values.CustomIdentifier]; ok {
 						hostID = host.ID
 					} else {
 						continue
@@ -395,6 +402,12 @@ func runChecker(checker *checks.Checker, checkReportCh chan *checks.Report, repo
 				// Do not report if nothing has changed
 				continue
 			}
+			if report.Status == checks.StatusOK && checker.Config.PreventAlertAutoClose {
+				// Do not report `OK` if `PreventAlertAutoClose`
+				lastStatus = report.Status
+				lastMessage = report.Message
+				continue
+			}
 			checkReportCh <- report
 
 			// If status has changed, send it immediately
@@ -415,11 +428,11 @@ func runChecker(checker *checks.Checker, checkReportCh chan *checks.Report, repo
 // runCheckersLoop generates "checker" goroutines
 // which run for each checker commands and one for HTTP POSTing
 // the reports to Mackerel API.
-func runCheckersLoop(c *Context, termCheckerCh <-chan struct{}, quit <-chan struct{}) {
+func runCheckersLoop(app *App, termCheckerCh <-chan struct{}, quit <-chan struct{}) {
 	checkReportCh := make(chan *checks.Report)
 	reportImmediateCh := make(chan struct{})
 
-	for _, checker := range c.Agent.Checkers {
+	for _, checker := range app.Agent.Checkers {
 		go runChecker(checker, checkReportCh, reportImmediateCh, quit)
 	}
 
@@ -428,7 +441,7 @@ func runCheckersLoop(c *Context, termCheckerCh <-chan struct{}, quit <-chan stru
 		select {
 		case <-time.After(1 * time.Minute):
 		case <-termCheckerCh:
-			logger.Debugf("received 'term' chan")
+			logger.Debugf("received 'term' chan for checkers loop")
 			exit = true
 		case <-reportImmediateCh:
 			logger.Debugf("received 'immediate' chan")
@@ -453,7 +466,7 @@ func runCheckersLoop(c *Context, termCheckerCh <-chan struct{}, quit <-chan stru
 			logger.Debugf("reports[%d]: %#v", i, report)
 		}
 
-		err := c.API.ReportCheckMonitors(c.Host.ID, reports)
+		err := app.API.ReportCheckMonitors(app.Host.ID, reports)
 		if err != nil {
 			logger.Errorf("ReportCheckMonitors: %s", err)
 
@@ -498,7 +511,7 @@ func collectHostSpecs() (string, map[string]interface{}, []spec.NetInterface, st
 }
 
 // UpdateHostSpecs updates the host information that is already registered on Mackerel.
-func (c *Context) UpdateHostSpecs() {
+func (app *App) UpdateHostSpecs() {
 	logger.Debugf("Updating host specs...")
 
 	hostname, meta, interfaces, customIdentifier, err := collectHostSpecs()
@@ -507,13 +520,13 @@ func (c *Context) UpdateHostSpecs() {
 		return
 	}
 
-	err = c.API.UpdateHost(c.Host.ID, mackerel.HostSpec{
+	err = app.API.UpdateHost(app.Host.ID, mackerel.HostSpec{
 		Name:             hostname,
 		Meta:             meta,
 		Interfaces:       interfaces,
-		RoleFullnames:    c.Config.Roles,
-		Checks:           c.Config.CheckNames(),
-		DisplayName:      c.Config.DisplayName,
+		RoleFullnames:    app.Config.Roles,
+		Checks:           app.Config.CheckNames(),
+		DisplayName:      app.Config.DisplayName,
 		CustomIdentifier: customIdentifier,
 	})
 
@@ -526,18 +539,18 @@ func (c *Context) UpdateHostSpecs() {
 
 // Prepare sets up API and registers the host data to the Mackerel server.
 // Use returned values to call Run().
-func Prepare(conf *config.Config) (*Context, error) {
+func Prepare(conf *config.Config) (*App, error) {
 	api, err := mackerel.NewAPI(conf.Apibase, conf.Apikey, conf.Verbose)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to prepare an api: %s", err.Error())
+		return nil, fmt.Errorf("failed to prepare an api: %s", err.Error())
 	}
 
 	host, err := prepareHost(conf, api)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to prepare host: %s", err.Error())
+		return nil, fmt.Errorf("failed to prepare host: %s", err.Error())
 	}
 
-	return &Context{
+	return &App{
 		Agent:  NewAgent(conf),
 		Config: conf,
 		Host:   host,
@@ -558,7 +571,7 @@ func RunOnce(conf *config.Config) error {
 		"metrics": metrics,
 	})
 	if err != nil {
-		logger.Warningf("Error while marshaling graphdefs: err = %s, graphdefs = %s.", err.Error(), graphdefs)
+		logger.Warningf("Error while marshaling graphdefs: err = %s, graphdefs = %v.", err.Error(), graphdefs)
 		return err
 	}
 	fmt.Println(string(json))
@@ -594,20 +607,21 @@ func runOncePayload(conf *config.Config) ([]mackerel.CreateGraphDefsPayload, *ma
 // NewAgent creates a new instance of agent.Agent from its configuration conf.
 func NewAgent(conf *config.Config) *agent.Agent {
 	return &agent.Agent{
-		MetricsGenerators: prepareGenerators(conf),
-		PluginGenerators:  pluginGenerators(conf),
-		Checkers:          createCheckers(conf),
+		MetricsGenerators:  prepareGenerators(conf),
+		PluginGenerators:   pluginGenerators(conf),
+		Checkers:           createCheckers(conf),
+		MetadataGenerators: metadataGenerators(conf),
 	}
 }
 
 // Run starts the main metric collecting logic and this function will never return.
-func Run(c *Context, termCh chan struct{}) error {
-	logger.Infof("Start: apibase = %s, hostName = %s, hostID = %s", c.Config.Apibase, c.Host.Name, c.Host.ID)
+func Run(app *App, termCh chan struct{}) error {
+	logger.Infof("Start: apibase = %s, hostName = %s, hostID = %s", app.Config.Apibase, app.Host.Name, app.Host.ID)
 
-	err := loop(c, termCh)
-	if err == nil && c.Config.HostStatus.OnStop != "" {
+	err := loop(app, termCh)
+	if err == nil && app.Config.HostStatus.OnStop != "" {
 		// TODO error handling. support retire(?)
-		e := c.API.UpdateHostStatus(c.Host.ID, c.Config.HostStatus.OnStop)
+		e := app.API.UpdateHostStatus(app.Host.ID, app.Config.HostStatus.OnStop)
 		if e != nil {
 			logger.Errorf("Failed update host status on stop: %s", e)
 		}
@@ -618,7 +632,7 @@ func Run(c *Context, termCh chan struct{}) error {
 func createCheckers(conf *config.Config) []*checks.Checker {
 	checkers := []*checks.Checker{}
 
-	for name, pluginConfig := range conf.Plugin["checks"] {
+	for name, pluginConfig := range conf.CheckPlugins {
 		checker := &checks.Checker{
 			Name:   name,
 			Config: pluginConfig,
@@ -636,5 +650,15 @@ func prepareGenerators(conf *config.Config) []metrics.Generator {
 	if diagnostic {
 		generators = append(generators, &metrics.AgentGenerator{})
 	}
+	return generators
+}
+
+func pluginGenerators(conf *config.Config) []metrics.PluginGenerator {
+	generators := []metrics.PluginGenerator{}
+
+	for _, pluginConfig := range conf.MetricPlugins {
+		generators = append(generators, metrics.NewPluginGenerator(pluginConfig))
+	}
+
 	return generators
 }

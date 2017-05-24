@@ -22,8 +22,8 @@ func TestInterfaceGenerate(t *testing.T) {
 		t.Errorf("should not raise error: %v", err)
 	}
 
-	if os.Getenv("TRAVIS") != "" {
-		t.Skip("Skip in Travis for now")
+	if os.Getenv("CIRCLECI") != "" {
+		t.Skip("Skip in CircleCI for now")
 	}
 
 	if len(value) == 0 {
@@ -32,6 +32,11 @@ func TestInterfaceGenerate(t *testing.T) {
 	}
 
 	iface := value[0]
+	// In Docker enabled Travis environment, there's "docker0" interface
+	// which does not have defaultGateway..
+	if iface.Name == "docker0" && os.Getenv("TRAVIS") != "" {
+		iface = value[1]
+	}
 	if len(iface.IPv4Addresses) <= 0 {
 		t.Error("interface should have ipv4Addresses")
 	}
@@ -57,8 +62,8 @@ func TestGenerateByIpCommand(t *testing.T) {
 		t.Errorf("should not raise error: %v", err)
 	}
 
-	if os.Getenv("TRAVIS") != "" {
-		t.Skip("Skip in Travis for now")
+	if os.Getenv("CIRCLECI") != "" {
+		t.Skip("Skip in CircleCI for now")
 	}
 
 	name := "eth0"

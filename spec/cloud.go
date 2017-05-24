@@ -56,10 +56,18 @@ func SuggestCloudGenerator() *CloudGenerator {
 	return nil
 }
 
-func isEC2() bool {
-	cl := http.Client{
+func httpCli() *http.Client {
+	return &http.Client{
 		Timeout: timeout,
+		Transport: &http.Transport{
+			// don't use HTTP_PROXY when requesting cloud instance metadata APIs
+			Proxy: nil,
+		},
 	}
+}
+
+func isEC2() bool {
+	cl := httpCli()
 	// '/ami-id` is may be aws specific URL
 	resp, err := cl.Get(ec2BaseURL.String() + "/ami-id")
 	if err != nil {
@@ -76,9 +84,7 @@ func isGCE() bool {
 }
 
 func requestGCEMeta() ([]byte, error) {
-	cl := http.Client{
-		Timeout: timeout,
-	}
+	cl := httpCli()
 	req, err := http.NewRequest("GET", gceMetaURL.String(), nil)
 	if err != nil {
 		return nil, err
@@ -104,9 +110,7 @@ type EC2Generator struct {
 
 // Generate collects metadata from cloud platform.
 func (g *EC2Generator) Generate() (interface{}, error) {
-	client := http.Client{
-		Timeout: timeout,
-	}
+	cl := httpCli()
 
 	metadataKeys := []string{
 		"instance-id",
@@ -118,7 +122,6 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 		"local-hostname",
 		"public-hostname",
 		"local-ipv4",
-		"public-keys",
 		"public-ipv4",
 		"reservation-id",
 	}
@@ -126,7 +129,7 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 	metadata := make(map[string]string)
 
 	for _, key := range metadataKeys {
-		resp, err := client.Get(g.baseURL.String() + "/" + key)
+		resp, err := cl.Get(g.baseURL.String() + "/" + key)
 		if err != nil {
 			cloudLogger.Debugf("This host may not be running on EC2. Error while reading '%s'", key)
 			return nil, nil
@@ -141,7 +144,7 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 			metadata[key] = string(body)
 			cloudLogger.Debugf("results %s:%s", key, string(body))
 		} else {
-			cloudLogger.Warningf("Status code of the result of requesting metadata '%s' is '%d'", key, resp.StatusCode)
+			cloudLogger.Debugf("Status code of the result of requesting metadata '%s' is '%d'", key, resp.StatusCode)
 		}
 	}
 
@@ -154,23 +157,23 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 
 // SuggestCustomIdentifier suggests the identifier of the EC2 instance
 func (g *EC2Generator) SuggestCustomIdentifier() (string, error) {
-	client := http.Client{Timeout: timeout}
+	cl := httpCli()
 	key := "instance-id"
-	resp, err := client.Get(g.baseURL.String() + "/" + key)
+	resp, err := cl.Get(g.baseURL.String() + "/" + key)
 	if err != nil {
-		return "", fmt.Errorf("Error while retrieving instance-id.")
+		return "", fmt.Errorf("error while retrieving instance-id")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Failed to request instance-id. response code: %d", resp.StatusCode)
+		return "", fmt.Errorf("failed to request instance-id. response code: %d", resp.StatusCode)
 	}
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("Results of requesting instance-id cannot be read: '%s'", err)
+		return "", fmt.Errorf("results of requesting instance-id cannot be read: '%s'", err)
 	}
 	instanceID := string(body)
 	if instanceID == "" {
-		return "", fmt.Errorf("Invalid instance id")
+		return "", fmt.Errorf("invalid instance id")
 	}
 	return instanceID + ".ec2.amazonaws.com", nil
 }

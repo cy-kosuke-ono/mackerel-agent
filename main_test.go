@@ -7,13 +7,12 @@ import (
 	"math"
 	"os"
 	"os/signal"
-	"runtime"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/mackerelio/mackerel-agent/command"
+	"github.com/mackerelio/mackerel-agent/pidfile"
 )
 
 func TestParseFlags(t *testing.T) {
@@ -21,7 +20,7 @@ func TestParseFlags(t *testing.T) {
 	confFile, err := ioutil.TempFile("", "mackerel-config-test")
 
 	if err != nil {
-		t.Fatalf("Could not create temprary config file for test")
+		t.Fatalf("Could not create temporary config file for test")
 	}
 	confFile.WriteString(`verbose=false
 root="/hoge/fuga"
@@ -62,7 +61,7 @@ func TestDetectForce(t *testing.T) {
 	// prepare dummy config
 	confFile, err := ioutil.TempFile("", "mackerel-config-test")
 	if err != nil {
-		t.Fatalf("Could not create temprary config file for test")
+		t.Fatalf("Could not create temporary config file for test")
 	}
 	confFile.WriteString(`apikey="DUMMYAPIKEY"
 `)
@@ -92,7 +91,7 @@ func TestDetectForce(t *testing.T) {
 func TestResolveConfigForRetire(t *testing.T) {
 	confFile, err := ioutil.TempFile("", "mackerel-config-test")
 	if err != nil {
-		t.Fatalf("Could not create temprary config file for test")
+		t.Fatalf("Could not create temporary config file for test")
 	}
 	confFile.WriteString(`apikey="DUMMYAPIKEY"
 `)
@@ -130,35 +129,29 @@ func TestCreateAndRemovePidFile(t *testing.T) {
 	fpath := file.Name()
 	defer os.Remove(fpath)
 
-	err = createPidFile(fpath)
+	err = pidfile.Create(fpath)
 	if err != nil {
 		t.Errorf("pid file should be created but, %s", err)
 	}
 
-	if runtime.GOOS != "windows" {
-		if err := createPidFile(fpath); err == nil || !strings.HasPrefix(err.Error(), "Pidfile found, try stopping another running mackerel-agent or delete") {
-			t.Errorf("creating pid file should be failed when the running process exists, %s", err)
-		}
-	}
-
-	removePidFile(fpath)
-	if err := createPidFile(fpath); err != nil {
+	pidfile.Remove(fpath)
+	if err := pidfile.Create(fpath); err != nil {
 		t.Errorf("pid file should be created but, %s", err)
 	}
 
-	removePidFile(fpath)
+	pidfile.Remove(fpath)
 	ioutil.WriteFile(fpath, []byte(fmt.Sprint(math.MaxInt32)), 0644)
-	if err := createPidFile(fpath); err != nil {
+	if err := pidfile.Create(fpath); err != nil {
 		t.Errorf("old pid file should be ignored and new pid file should be created but, %s", err)
 	}
 }
 
 func TestSignalHandler(t *testing.T) {
-	ctx := &command.Context{}
+	app := &command.App{}
 	termCh := make(chan struct{})
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
-	go signalHandler(c, ctx, termCh)
+	go signalHandler(c, app, termCh)
 
 	resultCh := make(chan int)
 
@@ -188,7 +181,7 @@ func TestConfigTestOK(t *testing.T) {
 	// prepare dummy config
 	confFile, err := ioutil.TempFile("", "mackerel-config-test")
 	if err != nil {
-		t.Fatalf("Could not create temprary config file for test")
+		t.Fatalf("Could not create temporary config file for test")
 	}
 	confFile.WriteString(`apikey="DUMMYAPIKEY"
 `)
@@ -208,7 +201,7 @@ func TestConfigTestNotFound(t *testing.T) {
 	// prepare dummy config
 	confFile, err := ioutil.TempFile("", "mackerel-config-test")
 	if err != nil {
-		t.Fatalf("Could not create temprary config file for test")
+		t.Fatalf("Could not create temporary config file for test")
 	}
 	confFile.WriteString(`apikey="DUMMYAPIKEY"
 `)
@@ -228,7 +221,7 @@ func TestConfigTestInvalidFormat(t *testing.T) {
 	// prepare dummy config
 	confFile, err := ioutil.TempFile("", "mackerel-config-test")
 	if err != nil {
-		t.Fatalf("Could not create temprary config file for test")
+		t.Fatalf("Could not create temporary config file for test")
 	}
 	confFile.WriteString(`apikey="DUMMYAPIKEY"
 invalid!!!
